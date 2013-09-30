@@ -9,3 +9,5 @@ Usage:
 1. Edit the configuration variables in the file above the DO NOT EDIT BELOW comment.
 2. Run it from shell, e.g.:
 $ php trac2github.php
+
+trac2github forked from the project of the same name.
