@@ -4,7 +4,14 @@ import argparse
 import xmltodict
 import pprint
 
-def makeLabels(xmldict):
+
+
+def githubPost(ghConfig, struct):
+    pprint.pprint(struct)
+    print ""
+
+
+def makeLabels(ghConfig, xmldict):
     labels = {}
 
     for issue in xmldict[u'savaneexport']['item']:
@@ -14,11 +21,16 @@ def makeLabels(xmldict):
 
     # Make the labels at GitHub
 
+    for label in labels.keys():
+        struct = {'name':label, 'color':'000000'}
+        githubPost(ghConfig, struct)
+
     #
 
     return labels
 
-def createIssue(issue, labels):
+
+def createIssue(ghConfig, issue, labels):
     title = issue['summary']
     body = issue['original_submission']
     assignee = 'blah' # convertAssignee(issue['assigned_to'])
@@ -30,8 +42,8 @@ def createIssue(issue, labels):
 
     struct = {'title':title, 'body':body, 'assignee':assignee, 'labels':label_array}
 
-    pprint.pprint(struct)
-    print ""
+    githubPost(ghConfig, struct)
+
 
 
 if __name__ == "__main__":
@@ -40,7 +52,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 
-
+    ghConfig = {'user':'', 'password':'', 'project':''}
 
 
     xml_file = vars(args)['xml_file']
@@ -49,7 +61,7 @@ if __name__ == "__main__":
     xmldict = xmltodict.parse(xml)
 
 
-    labels = makeLabels(xmldict)
+    labels = makeLabels(ghConfig, xmldict)
 
     for issue in xmldict[u'savaneexport']['item']:
-        createIssue(issue, labels)
+        createIssue(ghConfig, issue, labels)
