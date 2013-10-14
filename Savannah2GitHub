@@ -8,13 +8,30 @@ def makeLabels(xmldict):
     labels = {}
 
     for issue in xmldict[u'savaneexport']['item']:
-        labels['P: %s' % issue['priority']] = None
-        labels['C: %s' % issue['category']] = None
-        labels['S: %s' % issue['status']] = None
+        labels['P: %s' % issue['priority']] = 'P: %s' % issue['priority']
+        labels['C: %s' % issue['category']] = 'C: %s' % issue['category']
+        labels['S: %s' % issue['status']] = 'S: %s' % issue['status']
 
     # Make the labels at GitHub
 
+    #
+
     return labels
+
+def createIssue(issue, labels):
+    title = issue['summary']
+    body = issue['original_submission']
+    assignee = 'blah' # convertAssignee(issue['assigned_to'])
+    label_array = [
+        labels['P: %s' % issue['priority']],
+        labels['C: %s' % issue['category']],
+        labels['S: %s' % issue['status']],
+    ]
+
+    struct = {'title':title, 'body':body, 'assignee':assignee, 'labels':label_array}
+
+    pprint.pprint(struct)
+    print ""
 
 
 if __name__ == "__main__":
@@ -32,6 +49,7 @@ if __name__ == "__main__":
     xmldict = xmltodict.parse(xml)
 
 
-    makeLabels(xmldict)
+    labels = makeLabels(xmldict)
 
-
+    for issue in xmldict[u'savaneexport']['item']:
+        createIssue(issue, labels)
