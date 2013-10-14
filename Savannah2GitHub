@@ -1,0 +1,4 @@
+import xmltodict
+f=open("phedex.xml")
+xml=f.read()
+doc = xmltodict.parse(xml)
