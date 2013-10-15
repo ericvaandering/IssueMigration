@@ -1,17 +1,48 @@
 #!  /usr/bin/env python
 
 import argparse
+import pycurl
+import StringIO
 import xmltodict
+
 import pprint
 
 
 
-def githubPost(ghConfig, struct):
+def githubPost(ghConfig, struct, url):
+
+    print ghConfig
+    return
+
     pprint.pprint(struct)
     print ""
 
+    buf = StringIO.StringIO()
+    c = pycurl.Curl()
+
+    c.setopt(pycurl.USERPWD, "%s:%s" % (username, password));
+    c.setopt(pycurl.URL, "https://api.github.com/%s" % url)
+    c.setopt(pycurl.RETURNTRANSFER, true)
+    c.setopt(pycurl.SSL_VERIFYPEER, false)
+    c.setopt(pycurl.HEADER, false)
+    c.setopt(pycurl.POST, true)
+    c.setopt(pycurl.WRITEFUNCTION, buf.write)
+    c.setopt(pycurl.POSTFIELDS, json);
+    c.setopt(pycurl.USERAGENT, "Savannag2GitHub");
+
+    #c.setopt(pycurl.CUSTOMREQUEST, 'PATCH')
+    c.perform()
+    print buf.getvalue()
+    print c.getinfo(pycurl.HTTP_CODE), c.getinfo(pycurl.EFFECTIVE_URL)
+
+    c.close()
+
 
 def makeLabels(ghConfig, xmldict):
+
+    #POST /repos/:owner/:repo/labels
+    url = "/repos/%(owner)s/%(repo)s/labels" % ghConfig
+
     labels = {}
 
     for issue in xmldict[u'savaneexport']['item']:
@@ -23,7 +54,7 @@ def makeLabels(ghConfig, xmldict):
 
     for label in labels.keys():
         struct = {'name':label, 'color':'000000'}
-        githubPost(ghConfig, struct)
+        githubPost(ghConfig, struct, url)
 
     #
 
@@ -31,6 +62,10 @@ def makeLabels(ghConfig, xmldict):
 
 
 def createIssue(ghConfig, issue, labels):
+
+    # POST /repos/:owner/:repo/issues
+    url = "/repos/%(owner)s/%(repo)s/issues" % ghConfig
+
     title = issue['summary']
     body = issue['original_submission']
     assignee = 'blah' # convertAssignee(issue['assigned_to'])
@@ -42,20 +77,31 @@ def createIssue(ghConfig, issue, labels):
 
     struct = {'title':title, 'body':body, 'assignee':assignee, 'labels':label_array}
 
-    githubPost(ghConfig, struct)
+    githubPost(ghConfig, struct, url)
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Migrate Savannah issues from XML file to GitHub project')
     parser.add_argument('xml_file')
+    parser.add_argument('-r', '--repo', help='Github repository name')
+    parser.add_argument('-u', '--user', help='Github user name')
+    parser.add_argument('-p', '--pass', help='Github password for user')
+    parser.add_argument('-o', '--owner', help='Github owner of repository')
     args = parser.parse_args()
 
 
-    ghConfig = {'user':'', 'password':'', 'project':''}
+    ghConfig = {'user':'', 'password':'', 'owner':'', 'repo':''}
 
 
     xml_file = vars(args)['xml_file']
+    ghConfig.update({
+        'repo' : vars(args)['repo'],
+        'user' : vars(args)['user'],
+        'password' : vars(args)['pass'],
+        'owner' : vars(args)['owner'],
+    })
+
     xml_fh = open(xml_file)
     xml = xml_fh.read()
     xmldict = xmltodict.parse(xml)
