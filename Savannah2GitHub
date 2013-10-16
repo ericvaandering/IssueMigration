@@ -1,47 +1,14 @@
 #!  /usr/bin/env python
 
 import argparse
-import pycurl
 import StringIO
 import xmltodict
 
+from github import Github, GithubException
+
 import pprint
 
-
-
-def githubPost(ghConfig, struct, url):
-
-    print ghConfig
-    return
-
-    pprint.pprint(struct)
-    print ""
-
-    buf = StringIO.StringIO()
-    c = pycurl.Curl()
-
-    c.setopt(pycurl.USERPWD, "%s:%s" % (username, password));
-    c.setopt(pycurl.URL, "https://api.github.com/%s" % url)
-    c.setopt(pycurl.RETURNTRANSFER, true)
-    c.setopt(pycurl.SSL_VERIFYPEER, false)
-    c.setopt(pycurl.HEADER, false)
-    c.setopt(pycurl.POST, true)
-    c.setopt(pycurl.WRITEFUNCTION, buf.write)
-    c.setopt(pycurl.POSTFIELDS, json);
-    c.setopt(pycurl.USERAGENT, "Savannag2GitHub");
-
-    #c.setopt(pycurl.CUSTOMREQUEST, 'PATCH')
-    c.perform()
-    print buf.getvalue()
-    print c.getinfo(pycurl.HTTP_CODE), c.getinfo(pycurl.EFFECTIVE_URL)
-
-    c.close()
-
-
-def makeLabels(ghConfig, xmldict):
-
-    #POST /repos/:owner/:repo/labels
-    url = "/repos/%(owner)s/%(repo)s/labels" % ghConfig
+def makeLabels(repo, xmldict):
 
     labels = {}
 
@@ -50,34 +17,48 @@ def makeLabels(ghConfig, xmldict):
         labels['C: %s' % issue['category']] = 'C: %s' % issue['category']
         labels['S: %s' % issue['status']] = 'S: %s' % issue['status']
 
+    labels['S: Duplicate'] = 'duplicate'
+    labels['S: Invalid'] = 'invalid'
+
     # Make the labels at GitHub
 
     for label in labels.keys():
-        struct = {'name':label, 'color':'000000'}
-        githubPost(ghConfig, struct, url)
-
-    #
+        try:
+            repo.create_label(name=labels[label], color='000000')
+            print "Created label ", label, " as ", labels[label]
+        except GithubException:
+            print "Label ", labels[label], " already exists"
 
     return labels
 
+def convertAssignee(gh, name):
 
-def createIssue(ghConfig, issue, labels):
+    # Convert Savannah to Github names
 
-    # POST /repos/:owner/:repo/issues
-    url = "/repos/%(owner)s/%(repo)s/issues" % ghConfig
+    try:
+        return gh.get_user(name)
+    except: # Return user running code
+        oldname = name
+        name = gh.get_user().login
+        print "No github name for ", oldname, " using ", name
+        return gh.get_user(name)
+
+
+def createIssue(gh, repo, issue, labels):
 
     title = issue['summary']
-    body = issue['original_submission']
-    assignee = 'blah' # convertAssignee(issue['assigned_to'])
-    label_array = [
-        labels['P: %s' % issue['priority']],
-        labels['C: %s' % issue['category']],
-        labels['S: %s' % issue['status']],
-    ]
+    body = issue['original_submission'] or 'N/A'
+    assignee = convertAssignee(gh, issue['assigned_to'])
+    label_array = []
+    label_array.append(repo.get_label(labels['P: %s' % issue['priority']]))
+    label_array.append(repo.get_label(labels['C: %s' % issue['category']]))
+    label_array.append(repo.get_label(labels['S: %s' % issue['status']]))
 
-    struct = {'title':title, 'body':body, 'assignee':assignee, 'labels':label_array}
-
-    githubPost(ghConfig, struct, url)
+#    try:
+    json = repo.create_issue(title=title, body=body, assignee=assignee, labels=label_array)
+    return json
+#    except:
+#        print "Problem creating issue ", title
 
 
 
@@ -87,11 +68,11 @@ if __name__ == "__main__":
     parser.add_argument('-r', '--repo', help='Github repository name')
     parser.add_argument('-u', '--user', help='Github user name')
     parser.add_argument('-p', '--pass', help='Github password for user')
-    parser.add_argument('-o', '--owner', help='Github owner of repository')
+    parser.add_argument('-o', '--org', help='Github organization of repository (otherwise use USER)')
     args = parser.parse_args()
 
 
-    ghConfig = {'user':'', 'password':'', 'owner':'', 'repo':''}
+    ghConfig = {'user':'', 'password':'', 'org':'', 'repo':''}
 
 
     xml_file = vars(args)['xml_file']
@@ -99,15 +80,24 @@ if __name__ == "__main__":
         'repo' : vars(args)['repo'],
         'user' : vars(args)['user'],
         'password' : vars(args)['pass'],
-        'owner' : vars(args)['owner'],
+        'org' : vars(args)['org'],
     })
+
+    gh = Github(ghConfig['user'],ghConfig['password'])
+
+    if ghConfig['org']:
+        org = gh.get_organization(ghConfig['org'])
+        repo = org.get_repo(ghConfig['repo'])
+    else:
+        user = gh.get_user(ghConfig['user'])
+        repo = user.get_repo(ghConfig['repo'])
+
 
     xml_fh = open(xml_file)
     xml = xml_fh.read()
     xmldict = xmltodict.parse(xml)
 
-
-    labels = makeLabels(ghConfig, xmldict)
+    labels = makeLabels(repo, xmldict)
 
     for issue in xmldict[u'savaneexport']['item']:
-        createIssue(ghConfig, issue, labels)
+        createIssue(gh, repo, issue, labels)
