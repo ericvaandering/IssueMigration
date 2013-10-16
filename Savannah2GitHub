@@ -2,9 +2,12 @@
 
 import argparse
 import StringIO
+import time
 import xmltodict
 
 from github import Github, GithubException
+
+from my_maps import userMap, defaultUser
 
 import pprint
 
@@ -36,7 +39,7 @@ def convertAssignee(gh, name):
     # Convert Savannah to Github names
 
     try:
-        return gh.get_user(name)
+        return gh.get_user(userMap[name])
     except: # Return user running code
         oldname = name
         name = gh.get_user().login
@@ -54,11 +57,15 @@ def createIssue(gh, repo, issue, labels):
     label_array.append(repo.get_label(labels['C: %s' % issue['category']]))
     label_array.append(repo.get_label(labels['S: %s' % issue['status']]))
 
-#    try:
-    json = repo.create_issue(title=title, body=body, assignee=assignee, labels=label_array)
-    return json
-#    except:
-#        print "Problem creating issue ", title
+
+    header = 'Original Savannah ticket ' + issue['item_id'] + ' reported by ' + issue['assigned_to'] + ' on ' + time.ctime(int(issue['submitted_on'])) + '.\n\n'
+
+    try:
+        json = repo.create_issue(title=title, body=header+body, assignee=assignee, labels=label_array)
+        print "Created issue ", title
+    except GithubException as e:
+        print "Problem creating issue ", title
+        return
 
 
 
