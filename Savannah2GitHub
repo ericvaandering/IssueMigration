@@ -43,8 +43,47 @@ def convertAssignee(gh, name):
     except: # Return user running code
         oldname = name
         name = gh.get_user().login
-        print "No github name for ", oldname, " using ", name
+        print " No github name for ", oldname, " using ", name
         return gh.get_user(name)
+
+def addComments(savIssue, ghIssue):
+    try:
+        history = savIssue['history']
+    except KeyError:
+        print "  No history for event, no comments"
+        return
+
+    events = history['event']
+    if not isinstance(events, list):
+        events = [events]
+
+    for event in events:
+        date = time.ctime(int(event['date']))
+
+        fields = event['field']
+        if not isinstance(fields, list):
+            fields = [fields]
+
+        for field in fields:
+            author = field['modified_by']
+            type = field['field_name']
+
+            message = None
+            if type == 'Open/Closed':
+                message = field['new_value'] + ' by ' + author + ' on ' + date
+                print "  Added comment on who closed issue"
+            elif type == "Original_Submission":
+                value = ''
+                if field['new_value']:
+                    value += field['new_value']
+                if field['old_value']:
+                    value += field['old_value']
+
+                message = 'Comment by ' + author + ' on ' + date + '\n\n' + str(value)
+                print "  Added comment by " + author
+
+            if message:
+                ghIssue.create_comment(message)
 
 
 def createIssue(gh, repo, issue, labels):
@@ -61,12 +100,17 @@ def createIssue(gh, repo, issue, labels):
     header = 'Original Savannah ticket ' + issue['item_id'] + ' reported by ' + issue['assigned_to'] + ' on ' + time.ctime(int(issue['submitted_on'])) + '.\n\n'
 
     try:
-        json = repo.create_issue(title=title, body=header+body, assignee=assignee, labels=label_array)
+        ghIssue = repo.create_issue(title=title, body=header+body, assignee=assignee, labels=label_array)
         print "Created issue ", title
     except GithubException as e:
         print "Problem creating issue ", title
         return
 
+    addComments(issue, ghIssue)
+
+    if issue['open_closed'] == 'Closed':
+        print " Closed issue"
+        ghIssue.edit(state='closed')
 
 
 if __name__ == "__main__":
