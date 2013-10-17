@@ -45,14 +45,15 @@ def convertAssignee(gh, name):
     except: # Return user running code
         oldname = name
         name = gh.get_user().login
-        print " No github name for ", oldname, " using ", name
+#        print " No github name for ", oldname, " using ", name
         return gh.get_user(name)
 
 def addComments(savIssue, ghIssue):
+
+
     try:
         history = savIssue['history']
     except KeyError:
-        print "  No history for event, no comments"
         return
 
     events = history['event']
@@ -73,16 +74,13 @@ def addComments(savIssue, ghIssue):
             message = None
             if type == 'Open/Closed':
                 message = field['new_value'] + ' by ' + author + ' on ' + date
-                print "  Added comment on who closed issue"
             elif type == "Original_Submission":
                 value = ''
                 if field['new_value']:
                     value += field['new_value']
                 if field['old_value']:
                     value += field['old_value']
-
                 message = 'Comment by ' + author.encode('ascii', 'replace') + ' on ' + date + '\n\n' + value.encode('ascii', 'replace')
-                print "  Added comment by " + author
 
             if message:
                 try:
@@ -101,21 +99,23 @@ def createIssue(gh, repo, issue, labels):
     label_array.append(labels['C: %s' % issue['category']])
     label_array.append(labels['S: %s' % issue['status']])
 
-
     header = 'Original Savannah ticket ' + issue['item_id'] + ' reported by ' + issue['assigned_to'] + ' on ' + time.ctime(int(issue['submitted_on'])) + '.\n\n'
 
     try:
         ghIssue = repo.create_issue(title=title, body=header+body, assignee=assignee, labels=label_array)
-        print "Created issue ", title
+        print "Created issue ", issue['item_id']
     except GithubException as e:
-        print "Problem creating issue ", title
+        print "  ********* Problem creating issue ", issue['item_id']
         return
 
     addComments(issue, ghIssue)
 
     if issue['open_closed'] == 'Closed':
-        print " Closed issue"
-        ghIssue.edit(state='closed')
+        try:
+            ghIssue.edit(state='closed')
+        except GithubException:
+            print "  ********* Unable to close issue %s ************ " % issue['item_id']
+
 
 def checkRateLimit(gh, threshold=1000, sleepTime=300):
 
