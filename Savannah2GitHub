@@ -81,11 +81,14 @@ def addComments(savIssue, ghIssue):
                 if field['old_value']:
                     value += field['old_value']
 
-                message = 'Comment by ' + author + ' on ' + date + '\n\n' + str(value)
+                message = 'Comment by ' + author.encode('ascii', 'replace') + ' on ' + date + '\n\n' + value.encode('ascii', 'replace')
                 print "  Added comment by " + author
 
             if message:
-                ghIssue.create_comment(message)
+                try:
+                    ghIssue.create_comment(message)
+                except GithubException:
+                    print "  ********* Comment insertion failed ************
 
 
 def createIssue(gh, repo, issue, labels):
