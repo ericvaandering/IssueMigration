@@ -27,10 +27,12 @@ def makeLabels(repo, xmldict):
 
     for label in labels.keys():
         try:
-            repo.create_label(name=labels[label], color='000000')
+            ghLabel = repo.create_label(name=labels[label], color='000000')
             print "Created label ", label, " as ", labels[label]
+            labels[label] = ghLabel
         except GithubException:
             print "Label ", labels[label], " already exists"
+            labels[label] = repo.get_label(labels[label])
 
     return labels
 
@@ -92,9 +94,9 @@ def createIssue(gh, repo, issue, labels):
     body = issue['original_submission'] or 'N/A'
     assignee = convertAssignee(gh, issue['assigned_to'])
     label_array = []
-    label_array.append(repo.get_label(labels['P: %s' % issue['priority']]))
-    label_array.append(repo.get_label(labels['C: %s' % issue['category']]))
-    label_array.append(repo.get_label(labels['S: %s' % issue['status']]))
+    label_array.append(labels['P: %s' % issue['priority']])
+    label_array.append(labels['C: %s' % issue['category']])
+    label_array.append(labels['S: %s' % issue['status']])
 
 
     header = 'Original Savannah ticket ' + issue['item_id'] + ' reported by ' + issue['assigned_to'] + ' on ' + time.ctime(int(issue['submitted_on'])) + '.\n\n'
@@ -112,6 +114,18 @@ def createIssue(gh, repo, issue, labels):
         print " Closed issue"
         ghIssue.edit(state='closed')
 
+def checkRateLimit(gh, threshold=1000, sleepTime=300):
+
+    remaining = 0
+    while remaining < threshold:
+        lim = gh.get_rate_limit()
+        remaining = lim.rate.remaining
+
+        if remaining < threshold:
+            print "Only %s API calls remaining before rate limit. Sleeping for %s seconds." % (remaining, sleepTime)
+            time.sleep(sleepTime)
+
+    return remaining
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Migrate Savannah issues from XML file to GitHub project')
@@ -143,12 +157,13 @@ if __name__ == "__main__":
         user = gh.get_user(ghConfig['user'])
         repo = user.get_repo(ghConfig['repo'])
 
-
     xml_fh = open(xml_file)
     xml = xml_fh.read()
     xmldict = xmltodict.parse(xml)
 
     labels = makeLabels(repo, xmldict)
 
-    for issue in xmldict[u'savaneexport']['item']:
+    for count, issue in enumerate(xmldict[u'savaneexport']['item']):
+        if not count % 10: # Check every 10 issues
+            checkRateLimit(gh)
         createIssue(gh, repo, issue, labels)
