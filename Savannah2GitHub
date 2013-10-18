@@ -1,0 +1,203 @@
+#!  /usr/bin/env python
+
+import argparse
+import StringIO
+import time
+import xmltodict
+
+from github import Github, GithubException
+
+from my_maps import userMap, defaultUser
+
+import pprint
+
+def makeLabels(repo, xmldict):
+    """
+    Make or fetch all labels used in xmldict
+    """
+
+    labels = {}
+
+    for issue in xmldict[u'savaneexport']['item']:
+        labels['P: %s' % issue['priority']] = 'P: %s' % issue['priority']
+        labels['C: %s' % issue['category']] = 'C: %s' % issue['category']
+        labels['S: %s' % issue['status']] = 'S: %s' % issue['status']
+
+    labels['S: Duplicate'] = 'duplicate'
+    labels['S: Invalid'] = 'invalid'
+
+    # Make the labels at GitHub
+
+    for label in labels.keys():
+        try:
+            ghLabel = repo.create_label(name=labels[label], color='000000')
+            print "Created label ", label, " as ", labels[label]
+            labels[label] = ghLabel
+        except GithubException:
+            print "Label ", labels[label], " already exists"
+            labels[label] = repo.get_label(labels[label])
+
+    return labels
+
+def convertAssignee(gh, name):
+    """
+    Convert Savannah to Github names
+    """
+
+    # Could cache these too to reduce lookups
+
+    try:         # Convert with map
+        return gh.get_user(userMap[name])
+    except:
+        try:     # Return default user
+            return gh.get_user(defaultUser)
+        except:  # Return user running code
+            oldname = name
+            name = gh.get_user().login
+#           print " No github name for ", oldname, " using ", name
+            return gh.get_user(name)
+
+def addComments(savIssue, ghIssue):
+    """
+    Cycle through the XML history for the issue and try to identify comments
+    and closure events
+
+    Since XML to dict behaves differently when we have 1 child vs multiple,
+    promote everything to a list
+    """
+
+    try:
+        history = savIssue['history']
+    except KeyError:
+        return
+
+    events = history['event']
+    if not isinstance(events, list):
+        events = [events]
+
+    for event in events:
+        date = time.ctime(int(event['date']))
+
+        fields = event['field']
+        if not isinstance(fields, list):
+            fields = [fields]
+
+        for field in fields:
+            author = field['modified_by']
+            type = field['field_name']
+
+            message = None
+            if type == 'Open/Closed':
+                message = field['new_value'] + ' by ' + author + ' on ' + date
+            elif type == "Original_Submission":
+                value = ''
+                if field['new_value']:
+                    value += field['new_value']
+                if field['old_value']:
+                    value += field['old_value']
+                message = 'Comment by ' + author.encode('ascii', 'replace') + ' on ' + date + '\n\n' + value.encode('ascii', 'replace')
+
+            if message:
+                try:
+                    ghIssue.create_comment(message)
+                except GithubException:
+                    print "  ********* Comment insertion failed ************ "
+
+
+def createIssue(gh, repo, issue, labels):
+    """
+    Translate Savannah bugs/tasks into Github issues. Close as needed, add
+    comments as well
+    """
+
+    title = issue['summary']
+    body = issue['original_submission'] or 'N/A'
+    assignee = convertAssignee(gh, issue['assigned_to'])
+    label_array = []
+    label_array.append(labels['P: %s' % issue['priority']])
+    label_array.append(labels['C: %s' % issue['category']])
+    label_array.append(labels['S: %s' % issue['status']])
+
+    header = 'Original Savannah ticket ' + issue['item_id'] + ' reported by ' + issue['assigned_to'] + ' on ' + time.ctime(int(issue['submitted_on'])) + '.\n\n'
+
+    try:
+        ghIssue = repo.create_issue(title=title, body=header+body, assignee=assignee, labels=label_array)
+        print "Created issue ", issue['item_id']
+    except GithubException as e:
+        print "  ********* Problem creating issue ", issue['item_id']
+        return
+
+    addComments(issue, ghIssue)
+
+    if issue['open_closed'] == 'Closed':
+        try:
+            ghIssue.edit(state='closed')
+        except GithubException:
+            print "  ********* Unable to close issue %s ************ " % issue['item_id']
+
+
+def checkRateLimit(gh, threshold=1000, sleepTime=300):
+    """
+    Check how many queries remain and pause if necessary.
+    It can be an hour before the limit expires.
+    """
+
+    remaining = 0
+    while remaining < threshold:
+        lim = gh.get_rate_limit()
+        remaining = lim.rate.remaining
+
+        if remaining < threshold:
+            print "Only %s API calls remaining before rate limit. Sleeping for %s seconds." % (remaining, sleepTime)
+            time.sleep(sleepTime)
+
+    return remaining
+
+if __name__ == "__main__":
+
+    """
+    Migrate Savannah issues from XML file to GitHub project
+    invoke with -h option to get help on arguments
+    """
+
+    parser = argparse.ArgumentParser(description='Migrate Savannah issues from XML file to GitHub project')
+    parser.add_argument('xml_file')
+    parser.add_argument('-r', '--repo', help='Github repository name')
+    parser.add_argument('-u', '--user', help='Github user name')
+    parser.add_argument('-p', '--pass', help='Github password for user')
+    parser.add_argument('-o', '--org', help='Github organization of repository (otherwise use USER)')
+    args = parser.parse_args()
+
+    ghConfig = {'user':'', 'password':'', 'org':'', 'repo':''}
+
+    xml_file = vars(args)['xml_file']
+    ghConfig.update({
+        'repo' : vars(args)['repo'],
+        'user' : vars(args)['user'],
+        'password' : vars(args)['pass'],
+        'org' : vars(args)['org'],
+    })
+
+    gh = Github(ghConfig['user'],ghConfig['password'])
+
+    # Different handling if repo is owned by person or organization
+    if ghConfig['org']:
+        org = gh.get_organization(ghConfig['org'])
+        repo = org.get_repo(ghConfig['repo'])
+    else:
+        user = gh.get_user(ghConfig['user'])
+        repo = user.get_repo(ghConfig['repo'])
+
+    # Open XML file and turn to dictionary in memory
+    xml_fh = open(xml_file)
+    xml = xml_fh.read()
+    xmldict = xmltodict.parse(xml)
+
+    # Make or fetch all lables
+    labels = makeLabels(repo, xmldict)
+
+    # Loop over entries in dict, turn to GitHub issues
+    for count, issue in enumerate(xmldict[u'savaneexport']['item']):
+        if not count % 10: # Check every 10 issues
+            checkRateLimit(gh)
+        createIssue(gh, repo, issue, labels)
