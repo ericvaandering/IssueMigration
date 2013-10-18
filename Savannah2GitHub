@@ -12,6 +12,9 @@ from my_maps import userMap, defaultUser
 import pprint
 
 def makeLabels(repo, xmldict):
+    """
+    Make or fetch all labels used in xmldict
+    """
 
     labels = {}
 
@@ -37,19 +40,31 @@ def makeLabels(repo, xmldict):
     return labels
 
 def convertAssignee(gh, name):
+    """
+    Convert Savannah to Github names
+    """
 
-    # Convert Savannah to Github names
+    # Could cache these too to reduce lookups
 
-    try:
+    try:         # Convert with map
         return gh.get_user(userMap[name])
-    except: # Return user running code
-        oldname = name
-        name = gh.get_user().login
-#        print " No github name for ", oldname, " using ", name
-        return gh.get_user(name)
+    except:
+        try:     # Return default user
+            return gh.get_user(defaultUser)
+        except:  # Return user running code
+            oldname = name
+            name = gh.get_user().login
+#           print " No github name for ", oldname, " using ", name
+            return gh.get_user(name)
 
 def addComments(savIssue, ghIssue):
+    """
+    Cycle through the XML history for the issue and try to identify comments
+    and closure events
 
+    Since XML to dict behaves differently when we have 1 child vs multiple,
+    promote everything to a list
+    """
 
     try:
         history = savIssue['history']
@@ -90,6 +105,10 @@ def addComments(savIssue, ghIssue):
 
 
 def createIssue(gh, repo, issue, labels):
+    """
+    Translate Savannah bugs/tasks into Github issues. Close as needed, add
+    comments as well
+    """
 
     title = issue['summary']
     body = issue['original_submission'] or 'N/A'
@@ -118,6 +137,10 @@ def createIssue(gh, repo, issue, labels):
 
 
 def checkRateLimit(gh, threshold=1000, sleepTime=300):
+    """
+    Check how many queries remain and pause if necessary.
+    It can be an hour before the limit expires.
+    """
 
     remaining = 0
     while remaining < threshold:
@@ -131,6 +154,12 @@ def checkRateLimit(gh, threshold=1000, sleepTime=300):
     return remaining
 
 if __name__ == "__main__":
+
+    """
+    Migrate Savannah issues from XML file to GitHub project
+    invoke with -h option to get help on arguments
+    """
+
     parser = argparse.ArgumentParser(description='Migrate Savannah issues from XML file to GitHub project')
     parser.add_argument('xml_file')
     parser.add_argument('-r', '--repo', help='Github repository name')
@@ -139,9 +168,7 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--org', help='Github organization of repository (otherwise use USER)')
     args = parser.parse_args()
 
-
     ghConfig = {'user':'', 'password':'', 'org':'', 'repo':''}
-
 
     xml_file = vars(args)['xml_file']
     ghConfig.update({
@@ -153,6 +180,7 @@ if __name__ == "__main__":
 
     gh = Github(ghConfig['user'],ghConfig['password'])
 
+    # Different handling if repo is owned by person or organization
     if ghConfig['org']:
         org = gh.get_organization(ghConfig['org'])
         repo = org.get_repo(ghConfig['repo'])
@@ -160,12 +188,15 @@ if __name__ == "__main__":
         user = gh.get_user(ghConfig['user'])
         repo = user.get_repo(ghConfig['repo'])
 
+    # Open XML file and turn to dictionary in memory
     xml_fh = open(xml_file)
     xml = xml_fh.read()
     xmldict = xmltodict.parse(xml)
 
+    # Make or fetch all lables
     labels = makeLabels(repo, xmldict)
 
+    # Loop over entries in dict, turn to GitHub issues
     for count, issue in enumerate(xmldict[u'savaneexport']['item']):
         if not count % 10: # Check every 10 issues
             checkRateLimit(gh)
