@@ -10,22 +10,25 @@
 
 // Edit configuration below
 
-$username = 'Put your github username here';
-$password = 'Put your github password here';
-$project = 'Organization or User name';
-$repo = 'Repository name';
+$username = 'ericvaandering';
+$password = $_ENV["GHPASS"];
+$project = 'dmwm';
+$repo = 'testmigration2';
 
 // All users must be valid github logins!
 $users_list = array(
-	'TracUsermame' => 'GithubUsername',
-	'Trustmaster' => 'trustmaster',
-	'John.Done' => 'johndoe'
+	'yuyi' => 'yuyiguo',
+	'ewv' => 'ericvaandering',
+	'giffels' => 'giffels',
+//	'ewv' => 'ericvaandering',
+	'dsr' => 'dan131riley'
 );
 
-$mysqlhost_trac = 'Trac MySQL host';
-$mysqluser_trac = 'Trac MySQL user';
-$mysqlpassword_trac = 'Trac MySQL password';
-$mysqldb_trac = 'Trac MySQL database name';
+$mysqlhost_trac = 'trac-svn.cern.ch';
+$mysqluser_trac = 'CMSDMWM';
+$mysqlpassword_trac = $_ENV["TRACPASS"];
+$mysqlport_trac = '5000';
+$mysqldb_trac = 'CMSDMWM';
 
 // Do not convert milestones at this run
 $skip_milestones = false;
@@ -39,13 +42,14 @@ $ticket_offset = 0; // Start at this offset if limit > 0
 $ticket_limit = 0; // Max tickets per run if > 0
 
 // Do not convert comments
-$skip_comments = true;
+$skip_comments = false;
 $comments_offset = 0; // Start at this offset if limit > 0
 $comments_limit = 0; // Max comments per run if > 0
 
 // Paths to milestone/ticket cache if you run it multiple times with skip/offset
-$save_milestones = '/tmp/trac_milestones.list';
-$save_tickets = '/tmp/trac_tickets.list';
+$save_milestones = './trac_milestones.list';
+$save_tickets = './trac_tickets.list';
+$save_labels = './trac_labels.list';
 
 // Set this to true if you want to see the JSON output sent to GitHub
 $verbose = false;
@@ -61,7 +65,7 @@ error_reporting(E_ALL ^ E_NOTICE);
 ini_set('display_errors', 1);
 set_time_limit(0);
 
-$trac_db = new PDO('mysql:host='.$mysqlhost_trac.';dbname='.$mysqldb_trac, $mysqluser_trac, $mysqlpassword_trac);
+$trac_db = new PDO('mysql:host=trac-svn.cern.ch;port=5500;dbname=CMSDMWM', $mysqluser_trac, $mysqlpassword_trac);
 
 echo "Connected to Trac\n";
 
@@ -74,6 +78,21 @@ if (!$skip_milestones) {
 	// Export all milestones
 	$res = $trac_db->query("SELECT * FROM `milestone` ORDER BY `due`");
 	$mnum = 1;
+	$resp = github_add_milestone(array(
+		'title' => 'NoneSet',
+		'state' => 'closed',
+		'description' => 'Dummy Milestone',
+		'due_on' => "2001-01-01T01:01:01Z"
+	));
+	if (isset($resp['number'])) {
+		// OK
+		$milestones[crc32('NoneSet')] = (int) $resp['number'];
+		echo "Milestone NoneSet converted to {$resp['number']}\n";
+	} else {
+		// Error
+		$error = print_r($resp, 1);
+		echo "Failed to convert milestone NoneSet: $error\n";
+	}
 	foreach ($res->fetchAll() as $row) {
 		//$milestones[$row['name']] = ++$mnum;
 		$resp = github_add_milestone(array(
@@ -149,13 +168,22 @@ if (file_exists($save_tickets)) {
 	$tickets = unserialize(file_get_contents($save_tickets));
 }
 
+
 if (!$skip_tickets) {
 	// Export tickets
 	$limit = $ticket_limit > 0 ? "LIMIT $ticket_offset, $ticket_limit" : '';
-	$res = $trac_db->query("SELECT * FROM `ticket` ORDER BY `id` $limit");
+        $res = $trac_db->query("SELECT * FROM `ticket` ORDER BY `id` $limit");
+        echo "Fetched list of tickets.\n";
 	foreach ($res->fetchAll() as $row) {
+                echo "Found a ticket\n";
+                if ($row['component'] != "DBS") {
+                  echo "Not a DBS ticket\n";
+                  continue;                
+                }
 		if (empty($row['milestone'])) {
-			continue;
+                  echo "No milestone set\n";
+		  $row['milestone']='NoneSet';
+                  //	continue;
 		}
 		if (empty($row['owner']) || !isset($users_list[$row['owner']])) {
 			$row['owner'] = $username;
@@ -173,11 +201,12 @@ if (!$skip_tickets) {
 		if (!empty($labels['R'][crc32($row['resolution'])])) {
 		    $ticketLabels[] = $labels['R'][crc32($row['resolution'])];
 		}
+                $new_body = translate_markup('**Original TRAC ticket '.$row['id'].' reported by '.$row['reporter']."**\n".$row['description']);
 
         // There is a strange issue with summaries containing percent signs...
 		$resp = github_add_issue(array(
 			'title' => preg_replace("/%/", '[pct]', $row['summary']),
-			'body' => empty($row['description']) ? 'None' : translate_markup($row['description']),
+			'body' => $new_body,
 			'assignee' => isset($users_list[$row['owner']]) ? $users_list[$row['owner']] : $row['owner'],
 			'milestone' => $milestones[crc32($row['milestone'])],
 			'labels' => $ticketLabels
@@ -190,7 +219,7 @@ if (!$skip_tickets) {
 				// Close the issue
 				$resp = github_update_issue($resp['number'], array(
 					'title' => preg_replace("/%/", '[pct]', $row['summary']),
-					'body' => empty($row['description']) ? 'None' : translate_markup($row['description']),
+					'body' => $new_body,
 					'assignee' => isset($users_list[$row['owner']]) ? $users_list[$row['owner']] : $row['owner'],
 					'milestone' => $milestones[crc32($row['milestone'])],
 					'labels' => $ticketLabels,
@@ -216,7 +245,12 @@ if (!$skip_comments) {
 	$limit = $comments_limit > 0 ? "LIMIT $comments_offset, $comments_limit" : '';
 	$res = $trac_db->query("SELECT * FROM `ticket_change` where `field` = 'comment' AND `newvalue` != '' ORDER BY `ticket`, `time` $limit");
 	foreach ($res->fetchAll() as $row) {
+                if (!$tickets[$row['ticket']]) {
+                  echo "Comment for non-migrated ticket. Skipping.\n ";
+                  continue;
+                }
 		$text = strtolower($row['author']) == strtolower($username) ? $row['newvalue'] : '**Author: ' . $row['author'] . "**\n" . $row['newvalue'];
+                echo "Original ticket # ".$row['ticket'].", GH ticket # ".$tickets[$row['ticket']]."\n";
 		$resp = github_add_comment($tickets[$row['ticket']], translate_markup($text));
 		if (isset($resp['url'])) {
 			// OK
@@ -247,8 +281,8 @@ function github_post($url, $json, $patch = false) {
 	}
 	$ret = curl_exec($ch);
 	if(!$ret) { 
-        trigger_error(curl_error($ch)); 
-    } 
+        	trigger_error(curl_error($ch)); 
+    	} 
 	curl_close($ch);
 	return $ret;
 }
@@ -272,6 +306,7 @@ function github_add_issue($data) {
 }
 
 function github_add_comment($issue, $body) {
+        echo "Adding comment to ticket $issue\n"; 
 	global $project, $repo, $verbose;
 	if ($verbose) print_r($body);
 	return json_decode(github_post("/repos/$project/$repo/issues/$issue/comments", json_encode(array('body' => $body))), true);
@@ -296,3 +331,4 @@ function translate_markup($data) {
 }
 
 ?>
+
