@@ -6,4 +6,11 @@ defaultUser = 'ericvaandering'
 
 # Map of Savannah to GitHub usernames
 
-userMap = {'hernan':'ericvaandering'}
+userMap = {'hernan' : 'TonyWildish',
+           'asanchez' : 'alberto-sanchez',
+           'ratnik' : 'nataliaratnikova',
+           'wildish' : 'TonyWildish',
+           'huangch' : 'huangch-fnal',
+           'belforte' : 'belforte',
+           'fanzago' : 'fanzago',
+           }

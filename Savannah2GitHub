@@ -20,7 +20,14 @@ def makeLabels(repo, xmldict):
 
     for issue in xmldict[u'savaneexport']['item']:
         labels['P: %s' % issue['priority']] = 'P: %s' % issue['priority']
-        labels['C: %s' % issue['category']] = 'C: %s' % issue['category']
+        try:
+            labels['C: %s' % issue['category']] = 'C: %s' % issue['category']
+        except KeyError:
+            pass
+        try:
+            labels['Sev: %s' % issue['severity']] = 'Sev: %s' % issue['severity']
+        except KeyError:
+            pass
         labels['S: %s' % issue['status']] = 'S: %s' % issue['status']
 
     labels['S: Duplicate'] = 'duplicate'
@@ -110,12 +117,22 @@ def createIssue(gh, repo, issue, labels):
     comments as well
     """
 
+#    if int(issue['item_id']) < 95000:
+#        return
+
     title = issue['summary']
     body = issue['original_submission'] or 'N/A'
     assignee = convertAssignee(gh, issue['assigned_to'])
     label_array = []
     label_array.append(labels['P: %s' % issue['priority']])
-    label_array.append(labels['C: %s' % issue['category']])
+    try:
+        label_array.append(labels['C: %s' % issue['category']])
+    except KeyError:
+        pass
+    try:
+        label_array.append(labels['Sev: %s' % issue['severity']])
+    except KeyError:
+        pass
     label_array.append(labels['S: %s' % issue['status']])
 
     header = 'Original Savannah ticket ' + issue['item_id'] + ' reported by ' + issue['assigned_to'] + ' on ' + time.ctime(int(issue['submitted_on'])) + '.\n\n'
@@ -123,7 +140,7 @@ def createIssue(gh, repo, issue, labels):
     try:
         ghIssue = repo.create_issue(title=title, body=header+body, assignee=assignee, labels=label_array)
         print "Created issue ", issue['item_id']
-    except GithubException as e:
+    except:
         print "  ********* Problem creating issue ", issue['item_id']
         return
 
@@ -144,11 +161,15 @@ def checkRateLimit(gh, threshold=1000, sleepTime=300):
 
     remaining = 0
     while remaining < threshold:
-        lim = gh.get_rate_limit()
-        remaining = lim.rate.remaining
+        try:
+            lim = gh.get_rate_limit()
+            remaining = lim.rate.remaining
 
-        if remaining < threshold:
-            print "Only %s API calls remaining before rate limit. Sleeping for %s seconds." % (remaining, sleepTime)
+            if remaining < threshold:
+                print "Only %s API calls remaining before rate limit. Sleeping for %s seconds." % (remaining, sleepTime)
+                time.sleep(sleepTime)
+        except:
+            print "Error accessing server. Sleeping for %s seconds." % (sleepTime)
             time.sleep(sleepTime)
 
     return remaining
